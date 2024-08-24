@@ -3,8 +3,8 @@ import requests, time, pandas, datetime
 # URL of the last report, to link back to it in the current report
 lastReportURL = "https://discuit.net/DiscuitMeta/post/m613rjsc"
 # set fromDate to "" to get all
-fromDate = "20240816"
-toDate = "20240823"
+fromDate = "20240818"
+toDate = "20240825"
 
 # summary tables show top X items
 topX = 10
@@ -17,8 +17,6 @@ nextPage = ""
 
 baseURL = "https://discuit.net"
 #baseURL = "http://localhost:8080"
-
-dateTimeRestart = None
 
 ##########################################################
 
