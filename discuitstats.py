@@ -42,7 +42,7 @@ def daysAgo(dt):
 def cleanTitle(title):
   return title.translate(str.maketrans({
     "|": r"\|", "[": r"\[", "]": r"\]", "(": r"\(", ")": r"\)",
-    "_": r"\_", "*": "\*"}))
+    "_": r"\_", "*": r"\*"}))
 
 def fetchFeed(feedNext, disc = None, sort = "activity"):
   args = {"sort": sort, "next": feedNext}
@@ -124,7 +124,7 @@ def processPosts(posts, rawData, isRescan = False):
       username = post["username"]
       title = cleanTitle(post["title"].replace("\n", " "))
       postType = post["type"].title() # "text", "image", "link"
-      lastActivityRaw = serverDateToDT(post["lastActivityAt"])
+      lastActivityRaw = post["lastActivityAt"]
       rawData.loc[
         publicId,
         ["Type", "Disc", "Title", "User", "PublicId", "LastActivity", "IsBot", "CreateDate"]] =\
@@ -143,7 +143,6 @@ def updateRedos(publicIds, posts, rawData):
   for post in posts:
     publicId = post["publicId"]
     activity = post["lastActivityAt"]
-    activityDT = serverDateToDT(activity)
     # if a post was created after the date limit, comments cannot be in range
     if dateFormat(post["createdAt"]) > toDate:
       continue
@@ -151,7 +150,7 @@ def updateRedos(publicIds, posts, rawData):
       # if the post is in the redo set and its last activity is the same
       # as what has been seen in the rescanning so far, no need to update
       continue
-    if publicId in rawData.index and activityDT == rawData.loc[publicId]["LastActivity"]:
+    if publicId in rawData.index and activity == rawData.loc[publicId]["LastActivity"]:
       # if the current post last activity is equal to what was recorded
       # in the main loop, there is no change, so skip
       continue
@@ -174,7 +173,7 @@ def rescan(latestDate, publicIds, rawData):
         # save details of the top item of the feed for later, to determine
         # if the item was already seen, and therefore nothing changed
         # and we can stop looping
-        scanFirstDate = serverDateToNS(posts[0]["lastActivityAt"])
+        scanFirstDate = posts[0]["lastActivityAt"]
         scanFirstPublicId = posts[0]["publicId"]
       else:
         scanFirstDate = None
@@ -196,7 +195,7 @@ def getRedoPosts(latestDate, rawData):
   # and we're done rescanning
   while True:
     scanFirstPublicId, scanFirstDate = rescan(latestDate, publicIds, rawData)
-    latestDate = scanFirstDate
+    latestDate = serverDateToNS(scanFirstDate)
     if scanFirstDate is None:
       break # this should mean the feed is empty
     if firstIter:
@@ -215,8 +214,14 @@ def getRedoPosts(latestDate, rawData):
 def generateTables(nextPage):
   lastPostDate = ""
   rawData = pandas.DataFrame({
-    "Type": [], "Disc": [], "Title": [], "User": [], "PublicId": [],
-    "LastActivity": [], "IsBot": [], "CreateDate": []})
+    "Type": pandas.Series(dtype = "str"),
+    "Disc": pandas.Series(dtype = "str"),
+    "Title": pandas.Series(dtype = "str"),
+    "User": pandas.Series(dtype = "str"),
+    "PublicId": pandas.Series(dtype = "str"),
+    "LastActivity": pandas.Series(dtype = "str"),
+    "IsBot": pandas.Series(dtype = "bool"),
+    "CreateDate": pandas.Series(dtype = "str")})
   while True:
     print(f"Pagination parameter is: {nextPage}; last processed post date was: {lastPostDate}")
     posts, nextPage = fetchFeed(nextPage)
@@ -228,9 +233,7 @@ def generateTables(nextPage):
 
   # need to check for posts that were bumped during looping
   print("Relooping to search for posts that were bumped")
-  latestDate = int(
-    rawData.query("Type != 'Comment'")["LastActivity"].max().timestamp()
-    * 10**9)
+  latestDate = serverDateToNS(rawData.query("Type != 'Comment'")["LastActivity"].max())
   # get a list of posts to recheck
   redoPosts = getRedoPosts(latestDate, rawData)
   # process the rescans in chunks so as not to overwhelm the site
@@ -265,7 +268,7 @@ def topXReport(rawData):
 
   print("\nDiscuit API is [documented here](https://docs.discuit.net/getting-started). "
         "Source code of script generating the tables is "
-        "[available here](https://gist.github.com/reallytiredofclowns/b51f63d042a4b5416ceee282ee524295).")
+        "[available here](https://github.com/reallytiredofclowns/discuitstats).")
 
   registeredAccounts = requests.get(
     f"{baseURL}/api/_initial").json()["noUsers"]
