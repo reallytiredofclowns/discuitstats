@@ -1,10 +1,10 @@
 import requests, time, pandas, datetime
 
 # URL of the last report, to link back to it in the current report
-lastReportURL = "https://discuit.net/DiscuitMeta/post/m613rjsc"
+lastReportURL = "https://discuit.net/DiscuitMeta/post/KdiI1akq"
 # set fromDate to "" to get all
-fromDate = "20240818"
-toDate = "20240825"
+fromDate = "20240915"
+toDate = "20240922"
 
 # summary tables show top X items
 topX = 10
@@ -250,7 +250,7 @@ def generateTables(nextPage):
 
 def topXReport(rawData):
   rawData["IsBot"] = rawData["IsBot"].astype(bool)
-  if set(rawData["IsBot"].unique()) != {True, False}:
+  if not set(rawData["IsBot"].unique()).issubset({True, False}):
     print("Something went wrong; rawData's IsBot is not uniquely True/False")
     raise BaseException
   nonBot = rawData[~rawData["IsBot"].astype(bool)]
