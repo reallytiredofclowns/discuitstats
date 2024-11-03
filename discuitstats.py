@@ -1,10 +1,12 @@
 import requests, time, pandas, datetime
 
 # URL of the last report, to link back to it in the current report
-lastReportURL = "https://discuit.net/DiscuitMeta/post/KdiI1akq"
+lastReportURL = "https://discuit.net/DiscuitMeta/post/o_YhxriT"
 # set fromDate to "" to get all
-fromDate = "20240915"
-toDate = "20240922"
+fromDate = "20241027"
+toDate = "20241103"
+
+exportCSV = f"d:/docs/download/DiscuitActivity_{fromDate}_{toDate}.csv"
 
 # summary tables show top X items
 topX = 10
@@ -83,8 +85,8 @@ def processComments(post, rawData, publicId, discName):
       anyCommentValid = True
       postCommentId = publicId + "/" + comment["id"]
       if not postCommentId in rawData:
-        rawData.loc[postCommentId, ["Type", "Disc", "User", "PublicId", "IsBot"]] =\
-          ["Comment", discName, comment["username"], publicId, comment["username"] in ignoredUsers]
+        rawData.loc[postCommentId, ["Type", "Disc", "Title", "User", "PublicId", "IsBot", "CreateDate"]] =\
+          ["Comment", discName, cleanTitle(post["title"].replace("\n", " ")), comment["username"], publicId, comment["username"] in ignoredUsers, dateFormat(comment["createdAt"])]
     if commentsNext:
       comments = requests.get(
         f"{baseURL}/api/posts/{publicId}/comments",
@@ -250,6 +252,7 @@ def generateTables(nextPage):
 
 def topXReport(rawData):
   rawData["IsBot"] = rawData["IsBot"].astype(bool)
+  contentTypes = ["Texts", "Images", "Links", "Comments"]
   if not set(rawData["IsBot"].unique()).issubset({True, False}):
     print("Something went wrong; rawData's IsBot is not uniquely True/False")
     raise BaseException
@@ -302,14 +305,21 @@ def topXReport(rawData):
   # don't count posts created out-of-date-range (could have been included
   # due to comments being in date range)
   deletes = subset[
-    (subset["CreateDate"] > toDate) |
-    ((fromDate != "") & (subset["CreateDate"] < fromDate))
+    (subset["Type"] != "Comment") &
+    (
+      (subset["CreateDate"] > toDate) |
+      ((fromDate != "") & (subset["CreateDate"] < fromDate))
+    )
   ].index
   subset = subset.drop(index = deletes)
   subset["Type"] = subset["Type"] + "s"
   subset = (subset.groupby(["Disc", "Type"], as_index = False)
     .size().pivot(columns = "Type", index = "Disc", values = "size")
     .reset_index().fillna(0))
+  # if none of a post type/comment, need to create a zeroed column so it exists
+  for content in contentTypes:
+    if content not in subset:
+      subset[content] = 0
   subset["TotalPosts"] = subset["Texts"] + subset["Images"] + subset["Links"]
   subset["TotalEngagement"] = subset["TotalPosts"] + subset["Comments"]
   subset["Rank"] = subset["TotalEngagement"].rank(method = "min", ascending = False)
@@ -324,14 +334,21 @@ def topXReport(rawData):
   # user activity--remove Ghost and bot users from the active users table
   subset = rawData.query("(User != 'ghost') & ~IsBot").copy()
   deletes = subset[
-    (subset["CreateDate"] > toDate) |
-    ((fromDate != "") & (subset["CreateDate"] < fromDate))
+    (subset["Type"] != "Comment") &
+    (
+      (subset["CreateDate"] > toDate) |
+      ((fromDate != "") & (subset["CreateDate"] < fromDate))
+    )
   ].index
   subset = subset.drop(index = deletes)
   subset["Type"] = subset["Type"] + "s"
   subset = (subset.groupby(["User", "Type"], as_index = False)
     .size().pivot(columns = "Type", index = "User", values = "size")
     .reset_index().fillna(0))
+  # if none of a post type/comment, need to create a zeroed column so it exists
+  for content in contentTypes:
+    if content not in subset:
+      subset[content] = 0
   subset["TotalPosts"] = subset["Texts"] + subset["Images"] + subset["Links"]
   subset["TotalEngagement"] = subset["TotalPosts"] + subset["Comments"]
   subset["Rank"] = subset["TotalEngagement"].rank(method = "min", ascending = False)
@@ -345,4 +362,6 @@ def topXReport(rawData):
 ######################################################
 
 rawData = generateTables(nextPage)
+if exportCSV:
+  rawData.to_csv(exportCSV, index_label = "index")
 topXReport(rawData)
