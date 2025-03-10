@@ -1,10 +1,10 @@
-import requests, time, pandas, datetime
+import requests, time, pandas, datetime, re
 
 # URL of the last report, to link back to it in the current report
-lastReportURL = "https://discuit.net/DiscuitMeta/post/o_YhxriT"
+lastReportURL = "https://discuit.org/DiscuitMeta/post/UyBrJpoT"
 # set fromDate to "" to get all
-fromDate = "20241027"
-toDate = "20241103"
+fromDate = "20250302"
+toDate = "20250309"
 
 exportCSV = f"d:/docs/download/DiscuitActivity_{fromDate}_{toDate}.csv"
 
@@ -17,7 +17,7 @@ ignoredUsers = ["autotldr", "FlagWaverBot", "Betelgeuse", "catbot"]
 # initial feed nextPage parameter--to be used in eventual resumption code
 nextPage = ""
 
-baseURL = "https://discuit.net"
+baseURL = "https://discuit.org"
 #baseURL = "http://localhost:8080"
 
 ##########################################################
@@ -269,7 +269,7 @@ def topXReport(rawData):
 
   print(f"\n[Last week's report is here]({lastReportURL}).")
 
-  print("\nDiscuit API is [documented here](https://docs.discuit.net/getting-started). "
+  print("\nDiscuit API is [documented here](https://docs.discuit.org/getting-started). "
         "Source code of script generating the tables is "
         "[available here](https://github.com/reallytiredofclowns/discuitstats).")
 
@@ -292,6 +292,10 @@ def topXReport(rawData):
       subset["Rank"] = subset["Comments"].rank(method = "min", ascending = False)
       subset = subset.query("Rank <= @topX")
       subset = subset.sort_values("Rank")
+      # if Title is all whitespace, print a fake string of &nbsp; so the
+      # anchor isn't broken
+      allBlank = subset["Title"].str.match(r"[^\s]")
+      subset.loc[~allBlank, "Title"] = "&nbsp;" * 10
       subset["Title"] = (
         "[" + subset['Title'] + f"]({baseURL}/" + subset['Disc'] +
         "/post/" + subset.index + ")")
