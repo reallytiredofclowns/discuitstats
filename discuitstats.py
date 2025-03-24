@@ -1,10 +1,10 @@
 import requests, time, pandas, datetime, re
 
 # URL of the last report, to link back to it in the current report
-lastReportURL = "https://discuit.org/DiscuitMeta/post/UyBrJpoT"
+lastReportURL = "https://discuit.org/DiscuitMeta/post/wFN4bT_u"
 # set fromDate to "" to get all
-fromDate = "20250302"
-toDate = "20250309"
+fromDate = "20250316"
+toDate = "20250323"
 
 exportCSV = f"d:/docs/download/DiscuitActivity_{fromDate}_{toDate}.csv"
 
@@ -294,8 +294,8 @@ def topXReport(rawData):
       subset = subset.sort_values("Rank")
       # if Title is all whitespace, print a fake string of &nbsp; so the
       # anchor isn't broken
-      allBlank = subset["Title"].str.match(r"[^\s]")
-      subset.loc[~allBlank, "Title"] = "&nbsp;" * 10
+      allBlank = ~subset["Title"].str.fullmatch(r"^.*[^\s].*$")
+      subset.loc[allBlank, "Title"] = "&nbsp;" * 10
       subset["Title"] = (
         "[" + subset['Title'] + f"]({baseURL}/" + subset['Disc'] +
         "/post/" + subset.index + ")")
