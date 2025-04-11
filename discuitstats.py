@@ -1,10 +1,10 @@
 import requests, time, pandas, datetime, re
 
 # URL of the last report, to link back to it in the current report
-lastReportURL = "https://discuit.org/DiscuitMeta/post/wFN4bT_u"
+lastReportURL = "https://discuit.org/DiscuitMeta/post/zlHv6870"
 # set fromDate to "" to get all
-fromDate = "20250316"
-toDate = "20250323"
+fromDate = "20250330"
+toDate = "20250406"
 
 exportCSV = f"d:/docs/download/DiscuitActivity_{fromDate}_{toDate}.csv"
 
@@ -67,7 +67,7 @@ def commentIsValid(comment, rawData, postCommentId):
     commentDate = dateFormat(comment["editedAt"])
   else:
     commentDate = dateFormat(comment["createdAt"])
-  if (fromDate != "" and commentDate < fromDate) or commentDate > toDate:
+  if (fromDate != "" and commentDate < fromDate) or (commentDate > toDate and toDate):
     return False
   return True
 
@@ -111,7 +111,7 @@ def processPosts(posts, rawData, isRescan = False):
     createdAt = dateFormat(post["createdAt"])
     publicId = post["publicId"]
     discName = post["communityName"]
-    # server dates should be NNNNNN format, so coerce a blank toDate to "z"
+    # server dates should be NNNNNNNN format, so coerce a blank toDate to "z"
     # to simplify the comparisons
     validPostDate = (fromDate <= createdAt <= (toDate or "z")) or\
       (fromDate <= lastActivityAt <= (toDate or "z"))
@@ -146,7 +146,7 @@ def updateRedos(publicIds, posts, rawData):
     publicId = post["publicId"]
     activity = post["lastActivityAt"]
     # if a post was created after the date limit, comments cannot be in range
-    if dateFormat(post["createdAt"]) > toDate:
+    if dateFormat(post["createdAt"]) > toDate and toDate:
       continue
     if publicId in publicIds and publicIds[publicId]["lastActivityAt"] == activity:
       # if the post is in the redo set and its last activity is the same
