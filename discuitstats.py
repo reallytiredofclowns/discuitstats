@@ -1,10 +1,10 @@
 import requests, time, pandas, datetime, re
 
 # URL of the last report, to link back to it in the current report
-lastReportURL = "https://discuit.org/DiscuitMeta/post/zlHv6870"
+lastReportURL = "/DiscuitMeta/post/u9aUK7OB"
 # set fromDate to "" to get all
-fromDate = "20250330"
-toDate = "20250406"
+fromDate = "20250511"
+toDate = "20250518"
 
 exportCSV = f"d:/docs/download/DiscuitActivity_{fromDate}_{toDate}.csv"
 
@@ -12,7 +12,7 @@ exportCSV = f"d:/docs/download/DiscuitActivity_{fromDate}_{toDate}.csv"
 topX = 10
 
 # no point calculating stats for bots
-ignoredUsers = ["autotldr", "FlagWaverBot", "Betelgeuse", "catbot"]
+ignoredUsers = ["autotldr", "FlagWaverBot", "Betelgeuse", "catbot", "alttextbot"]
 
 # initial feed nextPage parameter--to be used in eventual resumption code
 nextPage = ""
@@ -297,7 +297,7 @@ def topXReport(rawData):
       allBlank = ~subset["Title"].str.fullmatch(r"^.*[^\s].*$")
       subset.loc[allBlank, "Title"] = "&nbsp;" * 10
       subset["Title"] = (
-        "[" + subset['Title'] + f"]({baseURL}/" + subset['Disc'] +
+        "[" + subset['Title'] + "](/" + subset['Disc'] +
         "/post/" + subset.index + ")")
       subset = subset[["Rank", "Disc", "Title", "User", "Comments"]]
       print(f"# Top {topX} most engaging {postType}s:")
@@ -330,7 +330,7 @@ def topXReport(rawData):
   subset = subset.query("Rank <= @topX")
   subset = subset.sort_values("Rank")
   subset = subset[["Rank", "Disc", "Texts", "Images", "Links", "TotalPosts", "Comments", "TotalEngagement"]]
-  subset["Disc"] = "[" + subset["Disc"] + "](" + baseURL + "/" + subset["Disc"] + ")"
+  subset["Disc"] = "[" + subset["Disc"] + "](/" + subset["Disc"] + ")"
   print(f"# Top {topX} most engaging Discs:")
   print(subset.to_markdown(index = False))
   print("\n")
@@ -359,7 +359,7 @@ def topXReport(rawData):
   subset = subset.query("Rank <= @topX")
   subset = subset.sort_values("Rank")
   subset = subset[["Rank", "User", "Texts", "Images", "Links", "TotalPosts", "Comments", "TotalEngagement"]]
-  subset["User"] = "[" + subset["User"] + "](" + baseURL + "/@" + subset["User"] + ")"
+  subset["User"] = "[" + subset["User"] + "](/@" + subset["User"] + ")"
   print(f"# Top {topX} most engaged Discuiteers:")
   print(subset.to_markdown(index = False))
 
