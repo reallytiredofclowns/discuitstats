@@ -1,10 +1,24 @@
-import requests, time, pandas, datetime, re
+import requests, time, pandas, datetime, sys
 
 # URL of the last report, to link back to it in the current report
-lastReportURL = "/DiscuitMeta/post/u9aUK7OB"
+lastReportURL = "/DiscuitMeta/post/sz4bEG3C"
 # set fromDate to "" to get all
-fromDate = "20250511"
-toDate = "20250518"
+fromDate = "20250622"
+toDate = "20250629"
+reportFileName = None # if not None, will write reports to text file specified
+
+# if command line arguments provided, replace the last report URL and dates
+commandLineArgs = sys.argv
+if len(commandLineArgs) == 5:
+  cmdURL, cmdFrom, cmdTo, cmdReport = commandLineArgs[1:]
+  if cmdURL:
+    lastReportURL = cmdURL
+  if cmdFrom:
+    fromDate = cmdFrom
+  if cmdTo:
+    toDate = cmdTo
+  if cmdReport:
+    reportFileName = cmdReport
 
 exportCSV = f"d:/docs/download/DiscuitActivity_{fromDate}_{toDate}.csv"
 
@@ -12,13 +26,15 @@ exportCSV = f"d:/docs/download/DiscuitActivity_{fromDate}_{toDate}.csv"
 topX = 10
 
 # no point calculating stats for bots
-ignoredUsers = ["autotldr", "FlagWaverBot", "Betelgeuse", "catbot", "alttextbot"]
+ignoredUsers = ["autotldr", "FlagWaverBot", "Betelgeuse", "catbot",
+                "alttextbot", "DiceBot"]
 
 # initial feed nextPage parameter--to be used in eventual resumption code
 nextPage = ""
 
 baseURL = "https://discuit.org"
 #baseURL = "http://localhost:8080"
+
 
 ##########################################################
 
@@ -85,8 +101,12 @@ def processComments(post, rawData, publicId, discName):
       anyCommentValid = True
       postCommentId = publicId + "/" + comment["id"]
       if not postCommentId in rawData:
-        rawData.loc[postCommentId, ["Type", "Disc", "Title", "User", "PublicId", "IsBot", "CreateDate"]] =\
-          ["Comment", discName, cleanTitle(post["title"].replace("\n", " ")), comment["username"], publicId, comment["username"] in ignoredUsers, dateFormat(comment["createdAt"])]
+        rawData.loc[
+          postCommentId,
+          ["Type", "Disc", "Title", "User", "PublicId", "IsBot", "CreateDate"]] =\
+          ["Comment", discName, cleanTitle(post["title"].replace("\n", " ")),
+           comment["username"], publicId, comment["username"] in ignoredUsers,
+           dateFormat(comment["createdAt"])]
     if commentsNext:
       comments = requests.get(
         f"{baseURL}/api/posts/{publicId}/comments",
@@ -250,7 +270,7 @@ def generateTables(nextPage):
     time.sleep(2)
   return rawData
 
-def topXReport(rawData):
+def topXReport(rawData, reportFile = None):
   rawData["IsBot"] = rawData["IsBot"].astype(bool)
   contentTypes = ["Texts", "Images", "Links", "Comments"]
   if not set(rawData["IsBot"].unique()).issubset({True, False}):
@@ -265,21 +285,21 @@ def topXReport(rawData):
   rawData["Comments"] = (
     rawData.groupby("PublicId")["Type"]
       .transform(lambda x: pandas.Series.count(x) - 1))
-  print(f"\n\nDiscuit week in review: {fromDate}-{toDate}\n")
+  print(f"Discuit week in review: {fromDate}-{toDate}\n", file = reportFile)
 
-  print(f"\n[Last week's report is here]({lastReportURL}).")
+  print(f"\n[Last week's report is here]({lastReportURL}).", file = reportFile)
 
   print("\nDiscuit API is [documented here](https://docs.discuit.org/getting-started). "
         "Source code of script generating the tables is "
-        "[available here](https://github.com/reallytiredofclowns/discuitstats).")
+        "[available here](https://github.com/reallytiredofclowns/discuitstats).", file = reportFile)
 
   registeredAccounts = requests.get(
     f"{baseURL}/api/_initial").json()["noUsers"]
   print(f"\n{activeUsers} users discussed {activePosts} posts in "
         f"{sumPostComments} comments over {numDiscs} total discs. "
-        f"At the time of this report, there were {registeredAccounts} accounts.\n")
+        f"At the time of this report, there were {registeredAccounts} accounts.\n", file = reportFile)
 
-  print("Felix30 has been [charting some of these numbers here](https://docs.google.com/spreadsheets/d/1H7zV_7YIZar9dwDHbutr0Dm9N6H-1mEXe0irIwSHsx0/edit#gid=1256137398).\n")
+  print("Felix30 has been [charting some of these numbers here](https://docs.google.com/spreadsheets/d/1H7zV_7YIZar9dwDHbutr0Dm9N6H-1mEXe0irIwSHsx0/edit#gid=1256137398).\n", file = reportFile)
 
   postTypes = rawData["Type"][rawData["Type"] != 'Comment'].unique()
   postTypes.sort()
@@ -300,9 +320,9 @@ def topXReport(rawData):
         "[" + subset['Title'] + "](/" + subset['Disc'] +
         "/post/" + subset.index + ")")
       subset = subset[["Rank", "Disc", "Title", "User", "Comments"]]
-      print(f"# Top {topX} most engaging {postType}s:")
-      print(subset.to_markdown(index = False))
-      print("\n\n")
+      print(f"# Top {topX} most engaging {postType}s:", file = reportFile)
+      print(subset.to_markdown(index = False), file = reportFile)
+      print("\n\n", file = reportFile)
 
   # disc activity
   subset = rawData.copy()
@@ -331,9 +351,9 @@ def topXReport(rawData):
   subset = subset.sort_values("Rank")
   subset = subset[["Rank", "Disc", "Texts", "Images", "Links", "TotalPosts", "Comments", "TotalEngagement"]]
   subset["Disc"] = "[" + subset["Disc"] + "](/" + subset["Disc"] + ")"
-  print(f"# Top {topX} most engaging Discs:")
-  print(subset.to_markdown(index = False))
-  print("\n")
+  print(f"# Top {topX} most engaging Discs:", file = reportFile)
+  print(subset.to_markdown(index = False), file = reportFile)
+  print("\n", file = reportFile)
 
   # user activity--remove Ghost and bot users from the active users table
   subset = rawData.query("(User != 'ghost') & ~IsBot").copy()
@@ -360,12 +380,16 @@ def topXReport(rawData):
   subset = subset.sort_values("Rank")
   subset = subset[["Rank", "User", "Texts", "Images", "Links", "TotalPosts", "Comments", "TotalEngagement"]]
   subset["User"] = "[" + subset["User"] + "](/@" + subset["User"] + ")"
-  print(f"# Top {topX} most engaged Discuiteers:")
-  print(subset.to_markdown(index = False))
+  print(f"# Top {topX} most engaged Discuiteers:", file = reportFile)
+  print(subset.to_markdown(index = False), file = reportFile)
 
 ######################################################
 
 rawData = generateTables(nextPage)
 if exportCSV:
   rawData.to_csv(exportCSV, index_label = "index")
-topXReport(rawData)
+if reportFileName:
+  with open(reportFileName, "w") as reportFile:
+    topXReport(rawData, reportFile)
+else:
+  topXReport(rawData)
