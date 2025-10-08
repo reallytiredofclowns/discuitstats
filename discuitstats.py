@@ -1,11 +1,11 @@
 import requests, time, pandas, datetime, sys
 
 # URL of the last report, to link back to it in the current report
-lastReportURL = "/DiscuitMeta/post/sz4bEG3C"
+lastReportURL = "/DiscuitMeta/post/WWK0WUHX"
 # set fromDate to "" to get all
-fromDate = "20250622"
-toDate = "20250629"
-reportFileName = None # if not None, will write reports to text file specified
+fromDate = "20250928"
+toDate = "20251005"
+reportFileName = None # "d:/docs/download/report_variations2.md" # if not None, will write reports to text file specified
 
 # if command line arguments provided, replace the last report URL and dates
 commandLineArgs = sys.argv
@@ -103,10 +103,10 @@ def processComments(post, rawData, publicId, discName):
       if not postCommentId in rawData:
         rawData.loc[
           postCommentId,
-          ["Type", "Disc", "Title", "User", "PublicId", "IsBot", "CreateDate"]] =\
+          ["Type", "Disc", "Title", "User", "PublicId", "IsBot", "CreateDate", "Upvotes", "Downvotes", "CommentBody"]] =\
           ["Comment", discName, cleanTitle(post["title"].replace("\n", " ")),
            comment["username"], publicId, comment["username"] in ignoredUsers,
-           dateFormat(comment["createdAt"])]
+           dateFormat(comment["createdAt"]), comment["upvotes"], comment["downvotes"], comment["body"]]
     if commentsNext:
       comments = requests.get(
         f"{baseURL}/api/posts/{publicId}/comments",
@@ -147,10 +147,12 @@ def processPosts(posts, rawData, isRescan = False):
       title = cleanTitle(post["title"].replace("\n", " "))
       postType = post["type"].title() # "text", "image", "link"
       lastActivityRaw = post["lastActivityAt"]
+      upvotes = post["upvotes"]
+      downvotes = post["downvotes"]
       rawData.loc[
         publicId,
-        ["Type", "Disc", "Title", "User", "PublicId", "LastActivity", "IsBot", "CreateDate"]] =\
-        [postType, discName, title, username, publicId, lastActivityRaw, username in ignoredUsers, createdAt]
+        ["Type", "Disc", "Title", "User", "PublicId", "LastActivity", "IsBot", "CreateDate", "Upvotes", "Downvotes"]] =\
+        [postType, discName, title, username, publicId, lastActivityRaw, username in ignoredUsers, createdAt, upvotes, downvotes]
     lastSuccessfulPostDate = lastActivityAt
   return lastSuccessfulPostDate, reachedTimeLimit
 
@@ -201,7 +203,7 @@ def rescan(latestDate, publicIds, rawData):
         scanFirstDate = None
         scanFirstPublicId = None
     updateRedos(publicIds, posts, rawData)
-    time.sleep(2)
+    #time.sleep(2)
     # stop loop if the pagination is earlier
     if nextPage is None or int(nextPage) < latestDate:
       break
@@ -243,7 +245,11 @@ def generateTables(nextPage):
     "PublicId": pandas.Series(dtype = "str"),
     "LastActivity": pandas.Series(dtype = "str"),
     "IsBot": pandas.Series(dtype = "bool"),
-    "CreateDate": pandas.Series(dtype = "str")})
+    "CreateDate": pandas.Series(dtype = "str"),
+    "Upvotes": pandas.Series(dtype = "int"),
+    "Downvotes": pandas.Series(dtype = "int"),
+    "CommentBody": pandas.Series(dtype = "str")})
+
   while True:
     print(f"Pagination parameter is: {nextPage}; last processed post date was: {lastPostDate}")
     posts, nextPage = fetchFeed(nextPage)
@@ -251,7 +257,7 @@ def generateTables(nextPage):
       posts, rawData)
     if nextPage is None or reachedTimeLimit:
       break
-    time.sleep(2)
+    #time.sleep(2)
 
   # need to check for posts that were bumped during looping
   print("Relooping to search for posts that were bumped")
@@ -267,39 +273,110 @@ def generateTables(nextPage):
       start += 10
     else:
       break
-    time.sleep(2)
+    #time.sleep(2)
   return rawData
 
-def topXReport(rawData, reportFile = None):
-  rawData["IsBot"] = rawData["IsBot"].astype(bool)
-  contentTypes = ["Texts", "Images", "Links", "Comments"]
-  if not set(rawData["IsBot"].unique()).issubset({True, False}):
-    print("Something went wrong; rawData's IsBot is not uniquely True/False")
+
+# !!! any point to separating this out as a function if comments/participants
+# have to be recalculated?
+# def finishData(rawData):
+#   rawData = rawData.copy()
+#   rawData["IsBot"] = rawData["IsBot"].astype(bool)
+#   if not set(rawData["IsBot"].unique()).issubset({True, False}):
+#     print("Something went wrong; rawData's IsBot is not uniquely True/False")
+#     raise BaseException
+#   # grouping by post's publicId, comment count is total count minus 1 (the post)
+#   rawData["Comments"] = (
+#     rawData.groupby("PublicId")["Type"]
+#       .transform(lambda x: pandas.Series.count(x) - 1))
+#   rawData["Participants"] = (
+#     rawData.groupby("PublicId")["User"]
+#       .transform(lambda x: pandas.Series.nunique(x)))
+#   return rawData
+
+
+
+# !!! filtering by vote percent requires the comment and participant count to be
+# recalculated
+# !!! test if bad comment accidentally removes post
+# test if bad post removes all comments
+# !!! counting OP as participant may not be valid since the post may be old
+# !!! test if op out of date range correctly counted in participants
+def topXReport(rawData, reportFile = None, rankVar = "Comments", minVotePct = 0, DiscuitURL = ""):
+  if rankVar == "Comments":
+    discRankVar = "TotalEngagement"
+  elif rankVar == "Participants":
+    discRankVar = rankVar
+  else:
+    print("rankVar needs to be Comments or Participants to force the use "
+          "of TotalEngagement or Participants in the disc rankings.")
     raise BaseException
-  nonBot = rawData[~rawData["IsBot"].astype(bool)]
-  sumPostComments = len(nonBot.query("Type == 'Comment'"))
-  numDiscs = len(nonBot['Disc'].unique())
-  activeUsers = len(nonBot['User'].unique())
-  activePosts = len(nonBot['PublicId'].unique())
+
+  # vote percent = 100 * upvotes / (upvotes + downvotes) and default to 100 if zero
+  # which can only happen if submitter undoes their auto vote
+  rawData = rawData.copy() # make a local copy instead of referencing original
+  # if a post is "bad," it and all its comments should be hidden
+  # if a comment is "bad," it's deleted but its post can stay if it is voted enough
+  rawData["VotePct"] = (100 * rawData["Upvotes"] / (rawData["Upvotes"] + rawData["Downvotes"])).fillna(100)
+  badPosts = rawData.query("(Type != 'Comment') & (VotePct < @minVotePct)")[["PublicId"]].drop_duplicates()
+  rawData = (
+    rawData.reset_index()
+    .merge(badPosts, on = "PublicId", how = "left", indicator = True)
+    .query("_merge == 'left_only'")
+    .drop(columns = "_merge")
+  )
+  rawData = rawData.query("(Type != 'Comment') | (VotePct >= @minVotePct)").set_index("index")
   # grouping by post's publicId, comment count is total count minus 1 (the post)
   rawData["Comments"] = (
     rawData.groupby("PublicId")["Type"]
       .transform(lambda x: pandas.Series.count(x) - 1))
-  print(f"Discuit week in review: {fromDate}-{toDate}\n", file = reportFile)
+  # participants is unique users including OP, but need to filter for dates
+  # create a fake name column to null out-of-date-range users
+  rawData["FakeName"] = rawData["User"]
+  rawData.loc[
+    ~(
+      (fromDate <= rawData["CreateDate"]) &
+      ((rawData["CreateDate"] <= toDate) | (toDate == ""))),
+    "FakeName"
+  ] = None
+  rawData["Participants"] = (
+    rawData.groupby("PublicId")["FakeName"]
+      .transform(
+        lambda x: pandas.Series.nunique(x)))
+  rawData.drop(columns = "FakeName", inplace = True)
+
+  contentTypes = ["Texts", "Images", "Links", "Comments"]
+  nonBot = rawData[~rawData["IsBot"].astype(bool)]
+  # comments in the dataframe should all be within the date range already
+  sumPostComments = len(
+    nonBot.query("(Type == 'Comment') & (@fromDate <= CreateDate) & "
+                 "((CreateDate <= @toDate) | (@toDate == ''))"))
+  numDiscs = len(nonBot['Disc'].unique())
+  activeUsers = len(
+    nonBot
+    .query("(@fromDate <= CreateDate) & ((CreateDate <= @toDate) | (@toDate == ''))")['User']
+    .unique())
+  # includes posts that are not inside the date range, if a comment was made in range
+  activePosts = len(nonBot['PublicId'].unique())
+
+  print(f"\n# rankVar = {rankVar}, minVotePct = {minVotePct}\n", file = reportFile)
+
+  print(f"\nDiscuit week in review: {fromDate}-{toDate}\n", file = reportFile)
 
   print(f"\n[Last week's report is here]({lastReportURL}).", file = reportFile)
 
   print("\nDiscuit API is [documented here](https://docs.discuit.org/getting-started). "
         "Source code of script generating the tables is "
         "[available here](https://github.com/reallytiredofclowns/discuitstats).", file = reportFile)
-
   registeredAccounts = requests.get(
     f"{baseURL}/api/_initial").json()["noUsers"]
   print(f"\n{activeUsers} users discussed {activePosts} posts in "
         f"{sumPostComments} comments over {numDiscs} total discs. "
         f"At the time of this report, there were {registeredAccounts} accounts.\n", file = reportFile)
 
-  print("Felix30 has been [charting some of these numbers here](https://docs.google.com/spreadsheets/d/1H7zV_7YIZar9dwDHbutr0Dm9N6H-1mEXe0irIwSHsx0/edit#gid=1256137398).\n", file = reportFile)
+  print("Felix30 has been [charting some of these numbers here](https://docs.google.com/spreadsheets/d/1H7zV_7YIZar9dwDHbutr0Dm9N6H-1mEXe0irIwSHsx0/edit#gid=1256137398). "
+        "asyoucanseE_ [has alternative charting](https://sheet.zohopublic.eu/sheet/published/gr2z56fe0a19d6468429b9d88b3e60c81b23b).\n",
+        file = reportFile)
 
   postTypes = rawData["Type"][rawData["Type"] != 'Comment'].unique()
   postTypes.sort()
@@ -307,9 +384,9 @@ def topXReport(rawData, reportFile = None):
     subset = (rawData.query("Type == @postType")
       .drop(columns = ["Type", "PublicId"]).copy())
     if len(subset):
-      # this really should be moved to the data capture section
+      # this really should be moved to the data capture section... or not? that would write escapes to CSV
       subset["User"] = subset["User"].str.replace("_", "\\_")
-      subset["Rank"] = subset["Comments"].rank(method = "min", ascending = False)
+      subset["Rank"] = subset[rankVar].rank(method = "min", ascending = False)
       subset = subset.query("Rank <= @topX")
       subset = subset.sort_values("Rank")
       # if Title is all whitespace, print a fake string of &nbsp; so the
@@ -317,19 +394,39 @@ def topXReport(rawData, reportFile = None):
       allBlank = ~subset["Title"].str.fullmatch(r"^.*[^\s].*$")
       subset.loc[allBlank, "Title"] = "&nbsp;" * 10
       subset["Title"] = (
-        "[" + subset['Title'] + "](/" + subset['Disc'] +
+        "[" + subset['Title'] + f"]({DiscuitURL}/" + subset['Disc'] +
         "/post/" + subset.index + ")")
-      subset = subset[["Rank", "Disc", "Title", "User", "Comments"]]
-      print(f"# Top {topX} most engaging {postType}s:", file = reportFile)
+      subset = subset[["Rank", "Disc", "Title", "User", rankVar]]
+      print(f"## Top {topX} most engaging {postType}s:", file = reportFile)
       print(subset.to_markdown(index = False), file = reportFile)
       print("\n\n", file = reportFile)
+
+  # # top comment, by votes, filtered
+  # subset = rawData.query("(Type == 'Comment') & (VotePct >= @minVotePct)").copy()
+  # subset["Rank"] = subset["Upvotes"].rank(method = "min", ascending = False)
+  # subset = subset.query("Rank <= @topX")
+  # subset = subset.sort_values("Rank")
+  # # restrict comment link text to 100 chars
+  # subset["CommentBody"] = subset["CommentBody"].str.replace("\n", " ")
+  # subset.loc[
+  #   subset["CommentBody"].str.len() > 100,
+  #   "CommentBody"
+  # ] = subset["CommentBody"].str.slice(0, 100) + "..."
+
+  # subset["CommentBody"] = (
+  #   "[" + subset["CommentBody"] + f"]({DiscuitURL}/" + subset['Disc'] +
+  #   "/post/" + subset.index + ")")
+  # subset = subset[["Rank", "Disc", "CommentBody", "User", "Upvotes"]]
+  # print(f"## Top {topX} most upvoted comments:", file = reportFile)
+  # print(subset.to_markdown(index = False), file = reportFile)
+  # print("\n\n", file = reportFile)
+
 
   # disc activity
   subset = rawData.copy()
   # don't count posts created out-of-date-range (could have been included
-  # due to comments being in date range)
+  # due to comments being in date range)... comments should already be in range
   deletes = subset[
-    (subset["Type"] != "Comment") &
     (
       (subset["CreateDate"] > toDate) |
       ((fromDate != "") & (subset["CreateDate"] < fromDate))
@@ -337,21 +434,28 @@ def topXReport(rawData, reportFile = None):
   ].index
   subset = subset.drop(index = deletes)
   subset["Type"] = subset["Type"] + "s"
+
+  # need to recalculate participants here at disc level, not post
+  participants = (
+    subset.groupby("Disc", as_index = False)["User"].nunique()
+    .rename(columns = {"User": "Participants"}))
   subset = (subset.groupby(["Disc", "Type"], as_index = False)
-    .size().pivot(columns = "Type", index = "Disc", values = "size")
+    .size().pivot(columns = "Type", index = "Disc", values = "size"))
+  subset = (
+    subset.merge(participants, how = "left", on = "Disc")
     .reset_index().fillna(0))
   # if none of a post type/comment, need to create a zeroed column so it exists
-  for content in contentTypes:
-    if content not in subset:
-      subset[content] = 0
+  for contentType in contentTypes:
+    if contentType not in subset:
+      subset[contentType] = 0
   subset["TotalPosts"] = subset["Texts"] + subset["Images"] + subset["Links"]
   subset["TotalEngagement"] = subset["TotalPosts"] + subset["Comments"]
-  subset["Rank"] = subset["TotalEngagement"].rank(method = "min", ascending = False)
+  subset["Rank"] = subset[discRankVar].rank(method = "min", ascending = False)
   subset = subset.query("Rank <= @topX")
   subset = subset.sort_values("Rank")
-  subset = subset[["Rank", "Disc", "Texts", "Images", "Links", "TotalPosts", "Comments", "TotalEngagement"]]
-  subset["Disc"] = "[" + subset["Disc"] + "](/" + subset["Disc"] + ")"
-  print(f"# Top {topX} most engaging Discs:", file = reportFile)
+  subset = subset[["Rank", "Disc", "Texts", "Images", "Links", "TotalPosts", "Comments", discRankVar]]
+  subset["Disc"] = "[" + subset["Disc"] + f"]({DiscuitURL}/" + subset["Disc"] + ")"
+  print(f"## Top {topX} most engaging Discs:", file = reportFile)
   print(subset.to_markdown(index = False), file = reportFile)
   print("\n", file = reportFile)
 
@@ -367,29 +471,39 @@ def topXReport(rawData, reportFile = None):
   subset = subset.drop(index = deletes)
   subset["Type"] = subset["Type"] + "s"
   subset = (subset.groupby(["User", "Type"], as_index = False)
-    .size().pivot(columns = "Type", index = "User", values = "size")
-    .reset_index().fillna(0))
+    .size()
+    .pivot(columns = "Type", index = "User", values = "size")
+    .reset_index()
+    .fillna(0))
   # if none of a post type/comment, need to create a zeroed column so it exists
   for content in contentTypes:
     if content not in subset:
       subset[content] = 0
   subset["TotalPosts"] = subset["Texts"] + subset["Images"] + subset["Links"]
   subset["TotalEngagement"] = subset["TotalPosts"] + subset["Comments"]
+  # users should always be ranked by total engagement after filtering
   subset["Rank"] = subset["TotalEngagement"].rank(method = "min", ascending = False)
   subset = subset.query("Rank <= @topX")
   subset = subset.sort_values("Rank")
   subset = subset[["Rank", "User", "Texts", "Images", "Links", "TotalPosts", "Comments", "TotalEngagement"]]
-  subset["User"] = "[" + subset["User"] + "](/@" + subset["User"] + ")"
-  print(f"# Top {topX} most engaged Discuiteers:", file = reportFile)
+  subset["User"] = "[" + subset["User"] + f"]({DiscuitURL}/@" + subset["User"] + ")"
+  print(f"## Top {topX} most engaged Discuiteers:", file = reportFile)
   print(subset.to_markdown(index = False), file = reportFile)
 
 ######################################################
 
 rawData = generateTables(nextPage)
 if exportCSV:
-  rawData.to_csv(exportCSV, index_label = "index")
+  rawData.drop(columns = ["Upvotes", "Downvotes", "CommentBody"]).to_csv(exportCSV, index_label = "index")
+#rawData = finishData(rawData)
 if reportFileName:
   with open(reportFileName, "w") as reportFile:
     topXReport(rawData, reportFile)
+    # topXReport(rawData, reportFile, rankVar = "Comments", minVotePct = 50, DiscuitURL = baseURL)
+
+    # topXReport(rawData, reportFile, rankVar = "Participants", minVotePct = 0, DiscuitURL = baseURL)
+    # topXReport(rawData, reportFile, rankVar = "Participants", minVotePct = 50, DiscuitURL = baseURL)
+
 else:
   topXReport(rawData)
+
