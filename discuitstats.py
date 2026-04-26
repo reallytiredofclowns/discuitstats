@@ -1,10 +1,12 @@
-import requests, time, pandas, datetime, sys
+import requests, time, pandas, datetime, sys, re
 
 # URL of the last report, to link back to it in the current report
-lastReportURL = "/DiscuitMeta/post/WWK0WUHX"
+lastReportURL = "/DiscuitMeta/post/UGQ1Enhy"
 # set fromDate to "" to get all
-fromDate = "20250928"
-toDate = "20251005"
+fromDate = "20260419"
+toDate = "20260426"
+
+
 reportFileName = None # "d:/docs/download/report_variations2.md" # if not None, will write reports to text file specified
 
 # if command line arguments provided, replace the last report URL and dates
@@ -27,7 +29,11 @@ topX = 10
 
 # no point calculating stats for bots
 ignoredUsers = ["autotldr", "FlagWaverBot", "Betelgeuse", "catbot",
-                "alttextbot", "DiceBot"]
+                "alttextbot", "DiceBot", "PingBot"]
+
+# for accounts partially controlled by bots and labelled
+# dict key is username; value is regular expression to filter comment body
+partialBots = {"ILostTheGame": r"^\[BOT\]"}
 
 # initial feed nextPage parameter--to be used in eventual resumption code
 nextPage = ""
@@ -87,6 +93,18 @@ def commentIsValid(comment, rawData, postCommentId):
     return False
   return True
 
+
+# True/False: does given text match the username's regular expression match
+# flagging bot posts of a user partially under bot control
+def isPartialBot(username, text):
+  if username not in partialBots:
+    return False
+  if re.compile(partialBots[username], re.I|re.S).search(text):
+    return True
+  else:
+    return False
+
+
 def processComments(post, rawData, publicId, discName):
   # posts from home feed don't seem to contain comments
   fullPost = getFullPost(post)
@@ -98,15 +116,19 @@ def processComments(post, rawData, publicId, discName):
       postCommentId = publicId + "/" + comment["id"]
       if not commentIsValid(comment, rawData, postCommentId):
         continue
+      if isPartialBot(comment["username"], comment["body"]):
+        continue
       anyCommentValid = True
       postCommentId = publicId + "/" + comment["id"]
       if not postCommentId in rawData:
         rawData.loc[
           postCommentId,
-          ["Type", "Disc", "Title", "User", "PublicId", "IsBot", "CreateDate", "Upvotes", "Downvotes", "CommentBody"]] =\
+          ["Type", "Disc", "Title", "User", "PublicId", "IsBot", "CreateDate",
+           "Upvotes", "Downvotes", "CommentBody"]] =\
           ["Comment", discName, cleanTitle(post["title"].replace("\n", " ")),
            comment["username"], publicId, comment["username"] in ignoredUsers,
-           dateFormat(comment["createdAt"]), comment["upvotes"], comment["downvotes"], comment["body"]]
+           dateFormat(comment["createdAt"]), comment["upvotes"],
+           comment["downvotes"], comment["body"]]
     if commentsNext:
       comments = requests.get(
         f"{baseURL}/api/posts/{publicId}/comments",
@@ -248,7 +270,8 @@ def generateTables(nextPage):
     "CreateDate": pandas.Series(dtype = "str"),
     "Upvotes": pandas.Series(dtype = "int"),
     "Downvotes": pandas.Series(dtype = "int"),
-    "CommentBody": pandas.Series(dtype = "str")})
+    "CommentBody": pandas.Series(dtype = "str"),
+    "SubIsBot": pandas.Series(dtype = "bool")})
 
   while True:
     print(f"Pagination parameter is: {nextPage}; last processed post date was: {lastPostDate}")
