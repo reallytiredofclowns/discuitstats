@@ -6,7 +6,6 @@ lastReportURL = "/DiscuitMeta/post/UGQ1Enhy"
 fromDate = "20260419"
 toDate = "20260426"
 
-
 reportFileName = None # "d:/docs/download/report_variations2.md" # if not None, will write reports to text file specified
 
 # if command line arguments provided, replace the last report URL and dates
@@ -116,19 +115,18 @@ def processComments(post, rawData, publicId, discName):
       postCommentId = publicId + "/" + comment["id"]
       if not commentIsValid(comment, rawData, postCommentId):
         continue
-      if isPartialBot(comment["username"], comment["body"]):
-        continue
       anyCommentValid = True
       postCommentId = publicId + "/" + comment["id"]
       if not postCommentId in rawData:
         rawData.loc[
           postCommentId,
           ["Type", "Disc", "Title", "User", "PublicId", "IsBot", "CreateDate",
-           "Upvotes", "Downvotes", "CommentBody"]] =\
+           "Upvotes", "Downvotes", "CommentBody", "PartialBot"]] =\
           ["Comment", discName, cleanTitle(post["title"].replace("\n", " ")),
            comment["username"], publicId, comment["username"] in ignoredUsers,
            dateFormat(comment["createdAt"]), comment["upvotes"],
-           comment["downvotes"], comment["body"]]
+           comment["downvotes"], comment["body"],
+           isPartialBot(comment["username"], comment["body"])]
     if commentsNext:
       comments = requests.get(
         f"{baseURL}/api/posts/{publicId}/comments",
@@ -271,7 +269,7 @@ def generateTables(nextPage):
     "Upvotes": pandas.Series(dtype = "int"),
     "Downvotes": pandas.Series(dtype = "int"),
     "CommentBody": pandas.Series(dtype = "str"),
-    "SubIsBot": pandas.Series(dtype = "bool")})
+    "PartialBot": pandas.Series(dtype = "bool")})
 
   while True:
     print(f"Pagination parameter is: {nextPage}; last processed post date was: {lastPostDate}")
@@ -297,6 +295,7 @@ def generateTables(nextPage):
     else:
       break
     #time.sleep(2)
+  rawData["PartialBot"] = rawData["PartialBot"].fillna(False)
   return rawData
 
 
@@ -369,7 +368,8 @@ def topXReport(rawData, reportFile = None, rankVar = "Comments", minVotePct = 0,
   rawData.drop(columns = "FakeName", inplace = True)
 
   contentTypes = ["Texts", "Images", "Links", "Comments"]
-  nonBot = rawData[~rawData["IsBot"].astype(bool)]
+  nonBot = rawData[~rawData["IsBot"].astype(bool) &
+                   ~rawData["PartialBot"].astype(bool)]
   # comments in the dataframe should all be within the date range already
   sumPostComments = len(
     nonBot.query("(Type == 'Comment') & (@fromDate <= CreateDate) & "
@@ -446,7 +446,7 @@ def topXReport(rawData, reportFile = None, rankVar = "Comments", minVotePct = 0,
 
 
   # disc activity
-  subset = rawData.copy()
+  subset = nonBot.copy()
   # don't count posts created out-of-date-range (could have been included
   # due to comments being in date range)... comments should already be in range
   deletes = subset[
@@ -483,7 +483,7 @@ def topXReport(rawData, reportFile = None, rankVar = "Comments", minVotePct = 0,
   print("\n", file = reportFile)
 
   # user activity--remove Ghost and bot users from the active users table
-  subset = rawData.query("(User != 'ghost') & ~IsBot").copy()
+  subset = rawData.query("(User != 'ghost') & ~IsBot & ~PartialBot").copy()
   deletes = subset[
     (subset["Type"] != "Comment") &
     (
