@@ -1,10 +1,10 @@
 import requests, time, pandas, datetime, sys, re
 
 # URL of the last report, to link back to it in the current report
-lastReportURL = "/DiscuitMeta/post/UGQ1Enhy"
+lastReportURL = "/DiscuitMeta/post/GjxcXGGN"
 # set fromDate to "" to get all
-fromDate = "20260419"
-toDate = "20260426"
+fromDate = "20260524"
+toDate = "20260531"
 
 reportFileName = None # "d:/docs/download/report_variations2.md" # if not None, will write reports to text file specified
 
@@ -28,11 +28,11 @@ topX = 10
 
 # no point calculating stats for bots
 ignoredUsers = ["autotldr", "FlagWaverBot", "Betelgeuse", "catbot",
-                "alttextbot", "DiceBot", "PingBot"]
+                "alttextbot", "DiceBot", "PingBot", "pig_bot"]
 
 # for accounts partially controlled by bots and labelled
 # dict key is username; value is regular expression to filter comment body
-partialBots = {"ILostTheGame": r"^\[BOT\]"}
+partialBots = {"ILostTheGame": r"^\[BOT\]", "AuralWanderer": r"^\[BOT\]"}
 
 # initial feed nextPage parameter--to be used in eventual resumption code
 nextPage = ""
@@ -483,7 +483,7 @@ def topXReport(rawData, reportFile = None, rankVar = "Comments", minVotePct = 0,
   print("\n", file = reportFile)
 
   # user activity--remove Ghost and bot users from the active users table
-  subset = rawData.query("(User != 'ghost') & ~IsBot & ~PartialBot").copy()
+  subset = nonBot.query("(User != 'ghost') & ~IsBot & ~PartialBot").copy()
   deletes = subset[
     (subset["Type"] != "Comment") &
     (
