@@ -1,12 +1,12 @@
-import requests, time, pandas, datetime, sys, re
+import requests, time, pandas, datetime, sys, re, urllib3.util
 
 # URL of the last report, to link back to it in the current report
-lastReportURL = "/DiscuitMeta/post/GjxcXGGN"
+lastReportURL = "/DiscuitMeta/post/2mK1Y0bb"
 # set fromDate to "" to get all
-fromDate = "20260524"
-toDate = "20260531"
+fromDate = "20261115"
+toDate = "20261122"
 
-reportFileName = None # "d:/docs/download/report_variations2.md" # if not None, will write reports to text file specified
+reportFileName = None # "/home/user/d/Docs/Download/report_variations2.md" # if not None, will write reports to text file specified
 
 # if command line arguments provided, replace the last report URL and dates
 commandLineArgs = sys.argv
@@ -21,14 +21,14 @@ if len(commandLineArgs) == 5:
   if cmdReport:
     reportFileName = cmdReport
 
-exportCSV = f"d:/docs/download/DiscuitActivity_{fromDate}_{toDate}.csv"
+exportCSV = f"/home/user/d/Docs/Download/discuitdump2/DiscuitActivity_{fromDate}_{toDate}.csv"
 
 # summary tables show top X items
 topX = 10
 
 # no point calculating stats for bots
 ignoredUsers = ["autotldr", "FlagWaverBot", "Betelgeuse", "catbot",
-                "alttextbot", "DiceBot", "PingBot", "pig_bot"]
+                "alttextbot", "DiceBot", "PingBot", "pig_bot", "SixShooter"]
 
 # for accounts partially controlled by bots and labelled
 # dict key is username; value is regular expression to filter comment body
@@ -42,6 +42,21 @@ baseURL = "https://discuit.org"
 
 
 ##########################################################
+
+session = requests.session()
+retries = urllib3.util.Retry(total = False, backoff_factor = 0.1, backoff_max = 10)
+session.mount('https://', requests.adapters.HTTPAdapter(max_retries = retries))
+
+def get(url, args = None):
+  if args is None:
+    args = {}
+  while True:
+    try:
+      response = session.get(url, args, timeout = 7)
+      return response
+    except:
+      print("Problem fetching data from server; retrying after sleeping...")
+      time.sleep(10)
 
 # convert string server datetime to "YYYYMMDD" format
 def dateFormat(date):
@@ -71,13 +86,12 @@ def fetchFeed(feedNext, disc = None, sort = "activity"):
   args = {"sort": sort, "next": feedNext}
   if disc:
     args["communityId"] = disc
-  response = requests.get(rf"{baseURL}/api/posts", args)
+  response = get(rf"{baseURL}/api/posts", args)
   json = response.json()
   return json["posts"], json["next"]
 
 def getFullPost(post):
-  return requests.get(
-    f"{baseURL}/api/posts/{post['publicId']}").json()
+  return get(f"{baseURL}/api/posts/{post['publicId']}").json()
 
 def commentIsValid(comment, rawData, postCommentId):
   if postCommentId in rawData.index:
@@ -128,7 +142,7 @@ def processComments(post, rawData, publicId, discName):
            comment["downvotes"], comment["body"],
            isPartialBot(comment["username"], comment["body"])]
     if commentsNext:
-      comments = requests.get(
+      comments = get(
         f"{baseURL}/api/posts/{publicId}/comments",
         {"next": commentsNext}).json()
       comments, commentsNext = comments["comments"], comments["next"]
@@ -207,6 +221,7 @@ def updateRedos(publicIds, posts, rawData):
 def rescan(latestDate, publicIds, rawData):
   nextPage = ""
   firstIter = True
+  cursorIntPat = re.compile(r"(\d+)\.")
   while True:
     print(f"Collecting bumped activity after main loop... nextPage = {nextPage} "
           f"with {len(publicIds)} posts in the rescan set")
@@ -225,7 +240,8 @@ def rescan(latestDate, publicIds, rawData):
     updateRedos(publicIds, posts, rawData)
     #time.sleep(2)
     # stop loop if the pagination is earlier
-    if nextPage is None or int(nextPage) < latestDate:
+    intPart = cursorIntPat.search(nextPage).group(1)
+    if nextPage is None or int(intPart) < latestDate:
       break
   return scanFirstPublicId, scanFirstDate
 
@@ -391,8 +407,7 @@ def topXReport(rawData, reportFile = None, rankVar = "Comments", minVotePct = 0,
   print("\nDiscuit API is [documented here](https://docs.discuit.org/getting-started). "
         "Source code of script generating the tables is "
         "[available here](https://github.com/reallytiredofclowns/discuitstats).", file = reportFile)
-  registeredAccounts = requests.get(
-    f"{baseURL}/api/_initial").json()["noUsers"]
+  registeredAccounts = get(f"{baseURL}/api/_initial").json()["noUsers"]
   print(f"\n{activeUsers} users discussed {activePosts} posts in "
         f"{sumPostComments} comments over {numDiscs} total discs. "
         f"At the time of this report, there were {registeredAccounts} accounts.\n", file = reportFile)
@@ -401,7 +416,7 @@ def topXReport(rawData, reportFile = None, rankVar = "Comments", minVotePct = 0,
         "asyoucanseE_ [has alternative charting](https://sheet.zohopublic.eu/sheet/published/gr2z56fe0a19d6468429b9d88b3e60c81b23b).\n",
         file = reportFile)
 
-  postTypes = rawData["Type"][rawData["Type"] != 'Comment'].unique()
+  postTypes = list(rawData["Type"][rawData["Type"] != 'Comment'].unique())
   postTypes.sort()
   for postType in postTypes:
     subset = (rawData.query("Type == @postType")
@@ -529,4 +544,3 @@ if reportFileName:
 
 else:
   topXReport(rawData)
-
